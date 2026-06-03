@@ -1,116 +1,150 @@
 import os
-import json
+import time
 import logging
 import boto3
-from typing import Dict, Any, Optional
 from botocore.exceptions import ClientError
 from backoff_algorithm import calculate_exponential_backoff
 
-# Enterprise habit: Always use structured logging rather than basic print() statements
-logger = logging.getLogger(__name__)
+# Safely extract the region from the environment, defaulting to us-east-1
+AWS_REGION = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+
+# Initialize clients with an explicit region fallback
+sqs_client = boto3.client('sqs', region_name=AWS_REGION)
+dynamodb_client = boto3.client('dynamodb', region_name=AWS_REGION)
+sns_client = boto3.client('sns', region_name=AWS_REGION)
+
+# Configure logging
+logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-class EnterpriseDLQProcessor:
-    """
-    AWS DLQ Processor built with enterprise transaction rigor.
-    Utilizes DynamoDB for idempotency locks to prevent race conditions.
-    """
-    def __init__(self) -> None:
-        # Initialize AWS Clients
-        self.sqs = boto3.client("sqs")
-        self.dynamodb = boto3.client("dynamodb")
-        self.sns = boto3.client("sns")
-        
-        # Load Infrastructure Variables with fail-safes
-        self.queue_url = os.environ.get("AWS_SQS_DLQ_URL")
-        self.table_name = os.environ.get("DYNAMODB_IDEMPOTENCY_TABLE")
-        self.sns_topic_arn = os.environ.get("SNS_ALERT_TOPIC_ARN")
-        
-        if not all([self.queue_url, self.table_name, self.sns_topic_arn]):
-            logger.error("CRITICAL: Missing required infrastructure environment variables.")
-            raise RuntimeError("Infrastructure misconfiguration.")
+# Environment variables mapping to the SAM template
+TABLE_NAME = os.environ.get('IDEMPOTENCY_TABLE', 'DLQIdempotencyTable')
+DLQ_URL = os.environ.get('DLQ_URL')
+SNS_TOPIC_ARN = os.environ.get('ALERT_TOPIC_ARN')
+MAX_RETRIES = 5
 
-    def _acquire_idempotency_lock(self, message_id: str) -> bool:
+class EnterpriseDLQProcessor:
+    def __init__(self, sqs, dynamodb, sns, table_name):
+        self.sqs = sqs
+        self.dynamodb = dynamodb
+        self.sns = sns
+        self.table_name = table_name
+
+    def _acquire_idempotency_lock(self, message_id):
         """
-        Idempotency Guard: Ensures a transaction is processed exactly once.
-        Analogous to an SAP ENQUEUE lock, but distributed via DynamoDB.
+        Attempts to acquire a distributed lock in DynamoDB via conditional writes.
+        Returns True if the lock is successfully acquired, False if it is a duplicate.
         """
+        # BUG 3 FIX: Calculate TTL (24 hours from current epoch) to ensure locks naturally expire
+        ttl_timestamp = int(time.time()) + 86400
+        
         try:
             self.dynamodb.put_item(
                 TableName=self.table_name,
                 Item={
-                    'MessageId': {'S': message_id}, 
-                    'Status': {'S': 'PROCESSING'}
+                    'MessageId': {'S': message_id},
+                    'Status': {'S': 'PROCESSING'},
+                    'ExpirationTime': {'N': str(ttl_timestamp)}
                 },
                 ConditionExpression='attribute_not_exists(MessageId)'
             )
             return True
         except ClientError as e:
             if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
-                logger.warning(f"Lock Collision: Message {message_id} is already in flight. Aborting.")
+                logger.warning(f"Duplicate message detected and ignored: {message_id}")
                 return False
-            logger.error(f"DynamoDB connection fault: {str(e)}")
             raise e
 
-    def process_failed_event(self, message: Dict[str, Any]) -> str:
-        """Core business logic for routing and remediating failed events."""
-        message_id = message.get('MessageId', 'UNKNOWN_ID')
-        receipt_handle = message.get('ReceiptHandle')
-        
-        logger.info(f"Initiating remediation sequence for event: {message_id}")
-
-        # 1. Enforce Idempotency (Prevent double-processing)
-        if not self._acquire_idempotency_lock(message_id):
-            return "DUPLICATE_IGNORED"
-
-        # 2. Defensive Data Parsing (Analytics habit: never trust the payload)
+    def _mark_processed(self, message_id):
+        """Updates the lock status to prevent future retries of completed work."""
         try:
-            attributes = message.get('MessageAttributes', {})
-            retry_count_str = attributes.get('RetryCount', {}).get('StringValue', '1')
-            retry_count = int(retry_count_str)
-        except (ValueError, TypeError) as e:
-            logger.error(f"Payload Corruption: Invalid RetryCount for {message_id}. Err: {e}")
-            return "FAULT_INVALID_PAYLOAD"
-
-        # 3. Handle Critical Escalation (SRE Paging)
-        if retry_count >= 5:
-            logger.error(f"Max retries breached for {message_id}. Paging SRE team via SNS.")
-            self.sns.publish(
-                TopicArn=self.sns_topic_arn,
-                Subject="CRITICAL: DLQ Event Remediation Failed",
-                Message=f"Transaction {message_id} failed 5 times. Manual SRE intervention required."
+            self.dynamodb.update_item(
+                TableName=self.table_name,
+                Key={'MessageId': {'S': message_id}},
+                UpdateExpression='SET #st = :status',
+                ExpressionAttributeNames={'#st': 'Status'},
+                ExpressionAttributeValues={':status': {'S': 'PROCESSED'}}
             )
-            self.sqs.delete_message(QueueUrl=self.queue_url, ReceiptHandle=receipt_handle)
-            return "ESCALATED_TO_SNS"
-
-        # 4. Zero-Cost Exponential Backoff
-        delay_seconds = int(calculate_exponential_backoff(retry_count))
-        
-        try:
-            self.sqs.change_message_visibility(
-                QueueUrl=self.queue_url,
-                ReceiptHandle=receipt_handle,
-                VisibilityTimeout=delay_seconds
-            )
-            logger.info(f"Success: Delayed {message_id} for {delay_seconds}s at zero compute cost.")
-            return f"DELAYED_{delay_seconds}S"
-            
         except ClientError as e:
-            logger.error(f"AWS API Fault: Failed to modify visibility timeout: {str(e)}")
-            return "FAULT_AWS_API"
-        
-def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    """
-    Standard AWS Lambda Entry Point.
-    Instantiates the Enterprise processor and iterates through the SQS event batch.
-    """
-    processor = EnterpriseDLQProcessor()
-    results = []
-    
-    # AWS SQS batches messages inside a 'Records' array
-    for record in event.get('Records', []):
-        status = processor.process_failed_event(record)
-        results.append({"MessageId": record.get('messageId', 'UNKNOWN'), "Status": status})
-        
-    logger.info(f"Batch processing complete. Results: {results}")
-    return {"statusCode": 200, "body": json.dumps(results)}
+            logger.error(f"Failed to update idempotency status for {message_id}: {e}")
+
+    def process_sqs_event(self, event):
+        """Main processing loop for incoming SQS batches."""
+        for record in event.get('Records', []):
+            # BUG 1 FIX: Use standard camelCase keys provided by AWS Lambda SQS triggers
+            message_id = record.get('messageId')
+            receipt_handle = record.get('receiptHandle')
+            message_attributes = record.get('messageAttributes', {})
+            
+            if not message_id or not receipt_handle:
+                logger.error("Invalid SQS record received: missing messageId or receiptHandle")
+                continue
+
+            # Safely extract custom retry count from message attributes
+            try:
+                retry_count = int(message_attributes.get('RetryCount', {}).get('stringValue', '1'))
+            except (ValueError, TypeError):
+                retry_count = 1
+
+            # 1. Idempotency Check
+            if not self._acquire_idempotency_lock(message_id):
+                continue  # Skip duplicate execution
+
+            try:
+                # 2. Business Logic Execution
+                self._execute_business_logic(record.get('body'))
+                
+                # 3. Success Cleanup
+                self._mark_processed(message_id)
+                self.sqs.delete_message(
+                    QueueUrl=DLQ_URL,
+                    ReceiptHandle=receipt_handle
+                )
+                logger.info(f"Successfully processed message {message_id}")
+
+            except Exception as e:
+                logger.error(f"Processing failed for {message_id}: {str(e)}")
+                
+                # 4. Escalation or Backoff
+                if retry_count >= MAX_RETRIES:
+                    logger.critical(f"Message {message_id} breached max retries. Escalating to SNS.")
+                    self.sns.publish(
+                        TopicArn=SNS_TOPIC_ARN,
+                        Message=f"DLQ Remediation Failed permanently for message: {message_id}",
+                        Subject="DLQ Max Retries Breached"
+                    )
+                    # Delete from queue to prevent an infinite loop after SNS escalation
+                    self.sqs.delete_message(QueueUrl=DLQ_URL, ReceiptHandle=receipt_handle)
+                else:
+                    # BUG 4 FIX: Ensure delay_seconds never truncates to 0 by enforcing a minimum floor
+                    raw_delay = calculate_exponential_backoff(retry_count)
+                    delay_seconds = max(1, int(raw_delay))
+                    
+                    logger.info(f"Applying backoff of {delay_seconds} seconds for {message_id}")
+                    
+                    # Note: Ensure `sqs:ChangeMessageVisibility` is added to the IAM template policy
+                    self.sqs.change_message_visibility(
+                        QueueUrl=DLQ_URL,
+                        ReceiptHandle=receipt_handle,
+                        VisibilityTimeout=delay_seconds
+                    )
+
+    def _execute_business_logic(self, payload):
+        """Simulates the downstream operation that might fail during an outage."""
+        logger.info("Executing remediation logic against downstream systems...")
+        # Add actual database or API logic here.
+        pass
+
+# Instantiate the processor globally so it is maintained across warm starts
+processor = EnterpriseDLQProcessor(
+    sqs=sqs_client,
+    dynamodb=dynamodb_client,
+    sns=sns_client,
+    table_name=TABLE_NAME
+)
+
+def lambda_handler(event, context):
+    """Standard AWS Lambda entry point."""
+    logger.info(f"Received batch of {len(event.get('Records', []))} messages")
+    processor.process_sqs_event(event)
+    return {"statusCode": 200, "body": "Batch processed successfully"}

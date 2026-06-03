@@ -1,19 +1,22 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Enterprise DLQ Auto-Remediation Architecture with Idempotency and SRE Alerting.
+Description: >
+  AWS Enterprise DLQ Auto-Remediation Engine.
+  Event-driven serverless pipeline for distributed system fault tolerance.
 
 Resources:
-  # 1. The Core Dead Letter Queue
+  # 1. The Dead Letter Queue
   EnterpriseDLQ:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: order-fulfillment-dlq
+      QueueName: EnterpriseFailureQueue
+      MessageRetentionPeriod: 1209600 # 14 days
 
-  # 2. DynamoDB Table for Distributed Locks (Idempotency)
+  # 2. The Idempotency Guard (DynamoDB)
   IdempotencyTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: dlq-idempotency-locks
+      TableName: DLQIdempotencyTable
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: MessageId
@@ -21,37 +24,64 @@ Resources:
       KeySchema:
         - AttributeName: MessageId
           KeyType: HASH
-      # Cost Optimization: Auto-delete lock records after 24 hours
       TimeToLiveSpecification:
         AttributeName: ExpirationTime
         Enabled: true
 
-  # 3. SNS Topic for SRE Paging
-  SREAlertTopic:
+  # 3. The Escalation Topic (SNS)
+  AlertTopic:
     Type: AWS::SNS::Topic
     Properties:
-      TopicName: sre-critical-dlq-alerts
+      TopicName: DLQEscalationAlerts
 
-  # 4. The Python Microservice
-  DLQProcessorFunction:
+  # 4. The Execution Engine (Lambda)
+  DLQRemediationFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: ./
-      Handler: sqs_processor.lambda_handler      # <--- UPDATE THIS LINE
+      CodeUri: .
+      Handler: src.sqs_processor.lambda_handler
       Runtime: python3.10
-      Timeout: 10
-      # ... rest of the properties remain identical
-      MemorySize: 128
+      Architectures:
+        - arm64
+      Timeout: 30
+      MemorySize: 256
       Environment:
         Variables:
-          AWS_SQS_DLQ_URL: !Ref EnterpriseDLQ
-          DYNAMODB_IDEMPOTENCY_TABLE: !Ref IdempotencyTable
-          SNS_ALERT_TOPIC_ARN: !Ref SREAlertTopic
-      # Strict Security: Grant only the exact permissions needed
+          IDEMPOTENCY_TABLE: !Ref IdempotencyTable
+          DLQ_URL: !Ref EnterpriseDLQ
+          ALERT_TOPIC_ARN: !Ref AlertTopic
       Policies:
+        # Standard polling permissions (Receive, Delete, GetAttributes)
         - SQSPollerPolicy:
             QueueName: !GetAtt EnterpriseDLQ.QueueName
+        
+        # Standard DynamoDB Read/Write permissions
         - DynamoDBCrudPolicy:
             TableName: !Ref IdempotencyTable
+            
+        # Standard SNS Publish permissions
         - SNSPublishMessagePolicy:
-            TopicName: !GetAtt SREAlertTopic.TopicName
+            TopicName: !GetAtt AlertTopic.TopicName
+
+        # BUG 2 FIX: Explicitly grant the required permission to modify message 
+        # visibility for the exponential backoff algorithm.
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sqs:ChangeMessageVisibility
+              Resource: !GetAtt EnterpriseDLQ.Arn
+
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt EnterpriseDLQ.Arn
+            BatchSize: 10
+
+Outputs:
+  DLQRemediationFunction:
+    Description: "DLQ Remediation Lambda Function ARN"
+    Value: !GetAtt DLQRemediationFunction.Arn
+  IdempotencyTableName:
+    Description: "DynamoDB Idempotency Table Name"
+    Value: !Ref IdempotencyTable
