@@ -3,8 +3,6 @@ import pytest
 from unittest.mock import MagicMock, patch
 from botocore.exceptions import ClientError
 
-# 1. We must mock the environment variables BEFORE importing the processor,
-# otherwise the __init__ fail-safe will crash the test.
 os.environ["AWS_SQS_DLQ_URL"] = "https://mock-queue"
 os.environ["DYNAMODB_IDEMPOTENCY_TABLE"] = "mock-idempotency-table"
 os.environ["SNS_ALERT_TOPIC_ARN"] = "arn:aws:sns:mock-region:1234:mock-topic"
@@ -14,23 +12,23 @@ from sqs_processor import EnterpriseDLQProcessor
 @patch("boto3.client")
 def test_idempotency_duplicate_rejection(mock_boto):
     """Proves the system safely ignores duplicate events using DynamoDB conditional checks."""
-    # Setup the mock DynamoDB to simulate a "ConditionalCheckFailedException" (Lock already exists)
+    # Setup the mock DynamoDB
     mock_dynamo = MagicMock()
     mock_dynamo.put_item.side_effect = ClientError(
         {"Error": {"Code": "ConditionalCheckFailedException"}}, 
         "PutItem"
     )
     
-    # Configure boto3.client to return our rigged DynamoDB mock
+    # Configure boto3.client to return our mock DynamoDB when requested
     mock_boto.side_effect = lambda service_name: mock_dynamo if service_name == "dynamodb" else MagicMock()
     
     processor = EnterpriseDLQProcessor()
     mock_message = {"MessageId": "123", "ReceiptHandle": "abc"}
     
-    # Execute
+    # Execute 
     result = processor.process_failed_event(mock_message)
     
-    # Assert
+    # Assert that the duplicate message was ignored and logged appropriately
     assert result == "DUPLICATE_IGNORED"
 
 @patch("boto3.client")

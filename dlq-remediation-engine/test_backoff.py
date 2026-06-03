@@ -12,5 +12,4 @@ def test_backoff_jitter_variance():
     delay_1 = calculate_exponential_backoff(attempt_number=4)
     delay_2 = calculate_exponential_backoff(attempt_number=4)
     
-    # The statistical probability of these being exactly identical is near zero
     assert delay_1 != delay_2

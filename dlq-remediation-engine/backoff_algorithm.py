@@ -9,10 +9,10 @@ def calculate_exponential_backoff(attempt_number, base_delay=2, max_delay=60):
     if attempt_number < 1:
         return 0
         
-    # Standard exponential growth: 2, 4, 8, 16...
+    # Exponential growth: 2, 4, 8, 16...
     exponential_delay = base_delay * (2 ** (attempt_number - 1))
     
-    # Cap the maximum delay to prevent infinite stalling
+    # Prevent infinite stalling
     capped_delay = min(exponential_delay, max_delay)
     
     # Add "Jitter" (randomness) to distribute retry spikes across the network
