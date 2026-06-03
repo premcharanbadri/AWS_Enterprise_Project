@@ -1,0 +1,4 @@
+obj/
+query_router
+*.o
+.DS_Store
