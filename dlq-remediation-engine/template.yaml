@@ -1,0 +1,34 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Enterprise DLQ Auto-Remediation Engine. 
+  Provisions an SQS Dead Letter Queue and a Lambda polling microservice.
+
+Resources:
+  # 1. The Dead-Letter Queue (The infrastructure that holds the failed events)
+  EnterpriseDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: order-fulfillment-dlq
+      MessageRetentionPeriod: 1209600 # 14 days maximum retention
+
+  # 2. The Remediation Compute Engine (Your Python Code)
+  DLQProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./
+      Handler: sqs_processor.SQSDeadLetterQueueProcessor.fetch_failed_events
+      Runtime: python3.10
+      Timeout: 30
+      MemorySize: 128
+      Environment:
+        Variables:
+          AWS_SQS_DLQ_URL: !Ref EnterpriseDLQ
+      Policies:
+        - SQSPollerPolicy:
+            QueueName: !GetAtt EnterpriseDLQ.QueueName
+
+Outputs:
+  QueueURL:
+    Description: "URL of the newly created DLQ"
+    Value: !Ref EnterpriseDLQ
