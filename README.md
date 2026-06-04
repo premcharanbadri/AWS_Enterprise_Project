@@ -1,17 +1,28 @@
-# AWS Enterprise Backend & Distributed Systems
+# [AWS Enterprise Backend & Distributed Systems](https://premcharanbadri.github.io/AWS_Enterprise_Project/)
 
 This repository contains four backend systems built to solve common enterprise infrastructure problems: managing distributed failures, securing internal data access, optimizing database compute costs, and making AI stateful and cost-efficient. The focus across these projects is fault tolerance, security, and algorithmic efficiency.
 
-## Architectural Deep Dives
+## Implemented Architecture
 
-To provide full transparency into the engineering logic, infrastructure trade-offs, and business value of this portfolio, I have published detailed architectural reviews for each core system. 
+To provide the complete logic, infrastructure trade-offs, and business value of this portfolio, I have published detailed architectural reviews for each core system. 
 
-Read the deployed documentation here:
+Read the full individual documentation here:
 
 * [System 1: Distributed DLQ Auto-Remediation Engine](https://premcharanbadri.github.io/AWS_Enterprise_Project/dlq-remediation-engine/index_dlq.html)
 * [System 2: Zero-Trust Data Mesh Proxy](https://premcharanbadri.github.io/AWS_Enterprise_Project/zero-trust-proxy-java/index_proxy.html)
 * [System 3: Cost-Aware Federated Query Router](https://premcharanbadri.github.io/AWS_Enterprise_Project/cost-aware-query-router/index_query_router.html)
 * [System 4: AWS Agentic Orchestrator](https://premcharanbadri.github.io/AWS_Enterprise_Project/aws_agentic_orchestrator/index_agent.html)
+
+
+---
+
+# Here below I explained what steps are needed to run these projects in your local system. To learn about the individual project, click on any of the links above:
+
+## These projects I built are not novel, here is one of my colleague's question after reviewing my projects:
+
+#### Are these "novel" problems?
+"These problems seem solved, are these novel projects or did you replicate them?"</em></p>
+To be honest, they are not novel. They are fundamental enterprise patterns. Startups reward engineers for building "novel" product features; massive tech companies like AWS reward engineers for deeply understanding how to implement foundational, solved problems safely from scratch. Building a zero-trust proxy proves I understand the low-level mechanics of network security, cryptography, and payload manipulation, rather than just knowing how to buy a vendor tool that does it for me.
 
 ## System 1: Distributed DLQ Auto-Remediation System
 
