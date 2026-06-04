@@ -5,12 +5,25 @@ Description: >
   Event-driven serverless pipeline for distributed system fault tolerance.
 
 Resources:
+  # 0. Terminal queue for poison-pill messages.
+  # Messages that keep failing land here instead of redriving forever.
+  TerminalDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: DLQTerminalQueue
+      MessageRetentionPeriod: 1209600 # 14 days
+
   # 1. The Dead Letter Queue
   EnterpriseDLQ:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: EnterpriseFailureQueue
       MessageRetentionPeriod: 1209600 # 14 days
+      # After 5 failed receives, stop retrying and move the message
+      # to the terminal queue for manual inspection.
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt TerminalDeadLetterQueue.Arn
+        maxReceiveCount: 5
 
   # 2. The Idempotency Guard (DynamoDB)
   IdempotencyTable:
@@ -89,3 +102,6 @@ Outputs:
   IdempotencyTableName:
     Description: "DynamoDB Idempotency Table Name"
     Value: !Ref IdempotencyTable
+  TerminalDeadLetterQueueUrl:
+    Description: "Queue URL for poison-pill messages that exhausted retries"
+    Value: !Ref TerminalDeadLetterQueue

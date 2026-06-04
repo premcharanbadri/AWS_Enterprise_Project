@@ -66,18 +66,18 @@
 
         <h2>2. Why I built it</h2>
         <p>Deploying AI agents in the enterprise has three massive bottlenecks: statefulness, cost, and data privacy. A standard Python AI script treats every call as a stateless, instantaneous event. If the script takes three minutes to run and the network drops, you lose all progress. Furthermore, if 5,000 employees trigger agents that each make 20 underlying API calls to external models, your token bill goes through the roof, and you risk leaking unmasked corporate data outside your firewall.</p>
-        <p>I built this to solve the plumbing. It turns experimental AI scripts into durable, production-ready enterprise software.</p>
+        <p>I built this to solve the plumbing around an agent: keeping its state, cutting its cost, and keeping the data private. The goal was to take a throwaway AI script and give it the structure you'd want before running it for real.</p>
 
         <h2>3. The System logic (Why I picked these tools)</h2>
         
-        <h3>AWS Step Functions & LangGraph for Statefulness</h3>
-        <p>Agents run in loops. If a compute container recycles halfway through a task, the agent dies. I used AWS Step Functions paired with DynamoDB-backed LangGraph checkpoints to completely abstract the execution state away from the volatile compute layer. Every time the agent makes a decision, it saves its state. If the server drops, a new container simply picks up the graph exactly where it left off.</p>
+        <h3>LangGraph for Statefulness (with Step Functions in mind)</h3>
+        <p>Agents run in loops. If the process restarts halfway through a task, the agent normally loses everything. To handle that, I built the agent as a LangGraph state machine with a checkpointer, so it saves its state after every step and can pick up where it left off. Right now the checkpointer runs in memory, which is enough for the local build. The same interface is meant to sit behind a durable store like DynamoDB, with AWS Step Functions driving the loop, once it runs in production.</p>
 
         <h3>Local Embeddings over OpenAI Embeddings</h3>
-        <p>To figure out if two questions are similar, you turn them into math (vectors) and compare them. Most developers just send the text to OpenAI's embedding API. In an enterprise, sending unmasked queries to a third party violates strict compliance boundaries. I chose to run a lightweight, open-source embedding model (<code>all-MiniLM-L6-v2</code>) locally inside the private AWS VPC. The data never leaves the corporate perimeter.</p>
+        <p>To figure out if two questions are similar, you turn them into math (vectors) and compare them. Most developers just send the text to OpenAI's embedding API. In an enterprise, sending unmasked queries to a third party violates strict compliance boundaries. I chose to run a lightweight, open-source embedding model (<code>all-MiniLM-L6-v2</code>) on the machine itself instead. The text never gets sent to a third party. Running it locally now also maps cleanly onto running it inside a private VPC later, where the data would stay inside your own network.</p>
 
         <h3>Redis for the Semantic Cache</h3>
-        <p>To compare vector math instantly, you need an in-memory datastore. Rather than doing slow, disk-based vector searches on a traditional relational database, I deployed a Redis vector database (Amazon ElastiCache). It allows for sub-millisecond similarity scans using Cosine Similarity, intercepting redundant requests in real-time.</p>
+        <p>Comparing vectors quickly needs an in-memory datastore rather than slow, disk-based searches on a relational database. I used Redis for this, storing the vectors and scanning them with cosine similarity so repeated questions get caught fast. Locally that's just a Redis instance; in production the same setup would run on Amazon ElastiCache.</p>
 
         <h2>4. Real-world bugs I had to fix</h2>
         <p>Tuning an AI system for production is a balancing act. During local integration testing, I ran into a critical semantic tuning issue:</p>
@@ -87,7 +87,7 @@
         </ul>
 
         <h2>5. The Bottom Line</h2>
-        <p>This AWS Agentic Orchestrator makes AI safe for enterprise scale. By intercepting redundant requests before they cross the network perimeter, we drive external API transaction costs to near zero. By running semantic evaluation locally, we guarantee SOC2 and GDPR compliance. And by serializing the execution state, we ensure our autonomous agents survive infrastructure drops without skipping a beat.</p>
+        <p>This AWS Agentic Orchestrator makes AI safe for enterprise scale. By intercepting redundant requests before they cross the network perimeter, we drive external API transaction costs to near zero. Keeping the embedding and cache lookups local means the queries never leave your own environment, which is the kind of thing that matters for SOC2 and GDPR. And by saving the execution state after each step, the agent can survive a restart instead of losing its progress.</p>
     </div>
 
 </body>

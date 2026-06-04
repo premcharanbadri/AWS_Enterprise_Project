@@ -154,7 +154,7 @@ I built the agent as a LangGraph state machine compiled with a checkpointer, so 
 
 *   **Language:** Python 3.11
     
-*   **Infrastructure:** LangGraph, Amazon ElastiCache (Redis), local HuggingFace embeddings
+*   **Infrastructure:** LangGraph, Redis locally (Amazon ElastiCache in production), local HuggingFace embeddings
     
 
 ### Running It Locally
