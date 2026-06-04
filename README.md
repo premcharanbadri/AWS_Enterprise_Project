@@ -8,7 +8,7 @@ To provide full transparency into the engineering logic, infrastructure trade-of
 
 Read the deployed documentation here:
 
-* [System 1: Distributed DLQ Auto-Remediation Engine](./dlq-remediation-engine/index_dlq.html)
+* [System 1: Distributed DLQ Auto-Remediation Engine]https://premcharanbadri.github.io/AWS_Enterprise_Project/dlq-remediation-engine/index_dlq.html
 * [System 2: Zero-Trust Data Mesh Proxy](./zero-trust-proxy-java/index_proxy.html)
 * [System 3: Cost-Aware Federated Query Router](./cost-aware-query-router/index_query_router.html)
 * [System 4: Aegis Agentic Orchestrator](./aws_agentic_orchestrator/system4_orchestrator.html)
