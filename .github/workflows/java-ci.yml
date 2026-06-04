@@ -1,0 +1,30 @@
+name: Zero-Trust Proxy CI
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'zero-trust-proxy-java/**'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'zero-trust-proxy-java/**'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Monorepo
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 21
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '21'
+        cache: maven
+
+    - name: Build and Test
+      working-directory: zero-trust-proxy-java
+      run: mvn -B clean test

@@ -1,0 +1,27 @@
+name: Query Router CI
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'cost-aware-query-router/**'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'cost-aware-query-router/**'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Monorepo
+      uses: actions/checkout@v4
+
+    - name: Compile
+      working-directory: cost-aware-query-router
+      run: make
+
+    - name: Run Routing Test Suite
+      working-directory: cost-aware-query-router
+      run: ./query_router

@@ -47,7 +47,7 @@ Make sure you have an active Python virtual environment and `pytest` installed.
 
 *   **Network Isolation:** Move the Lambda function into a private VPC using AWS PrivateLink so the payloads never hit the public internet.
     
-*   **Batch Processing:** Update the SQS trigger to process messages in batches of 10. This drastically cuts down on AWS API calls during major outages.
+*   **Partial-Batch Tuning:** The SQS trigger already processes batches of 10 and reports per-message failures (`ReportBatchItemFailures`) so a single bad message doesn't redrive the whole batch. Next, tune `maxReceiveCount` and a true terminal DLQ for poison-pill messages.
     
 
 ## System 2: Zero-Trust Data Mesh Proxy System
@@ -148,7 +148,7 @@ A Python-based orchestrator that wraps autonomous AI agents in a stateful, cost-
 
 Deploying AI in an enterprise has two major bottlenecks: volatile execution state and massive API costs from redundant queries.
 
-I used AWS Step Functions and LangGraph to checkpoint the agent's memory so it can survive container restarts. To cut token costs, I deployed a local semantic cache using an open-source embedding model and Redis. It intercepts mathematically similar prompts and returns cached answers without making external API calls, keeping corporate data safely inside the firewall.
+I built the agent as a LangGraph state machine compiled with a checkpointer, so run state is persisted by `thread_id` and can be resumed after a restart. The local MVP uses an in-memory checkpointer; in production the same interface is backed by a durable store (e.g. DynamoDB) and orchestrated by AWS Step Functions. To cut token costs, I added a local semantic cache using an open-source embedding model and Redis. It intercepts mathematically similar prompts and returns cached answers without making external API calls, keeping corporate data safely inside the firewall.
 
 ### Tech Stack
 
@@ -167,5 +167,5 @@ Ensure you have a local Redis instance running.
     source venv/bin/activate
     pip install -r requirements.txt
     
-    # Execute the local orchestrator script
-    python src/main.py
+    # Execute the local orchestrator as a module (resolves the `src` package)
+    python -m src.main

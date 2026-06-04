@@ -1,87 +1,115 @@
 import os
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from botocore.exceptions import ClientError
 
-os.environ["AWS_SQS_DLQ_URL"] = "https://mock-queue"
-os.environ["DYNAMODB_IDEMPOTENCY_TABLE"] = "mock-idempotency-table"
-os.environ["SNS_ALERT_TOPIC_ARN"] = "arn:aws:sns:mock-region:1234:mock-topic"
+# Ensure a region is present before the module instantiates its boto3 clients.
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 
 from sqs_processor import EnterpriseDLQProcessor
 
-@patch("boto3.client")
-def test_idempotency_duplicate_rejection(mock_boto):
-    """Proves the system safely ignores duplicate events using DynamoDB conditional checks."""
-    # Setup the mock DynamoDB
-    mock_dynamo = MagicMock()
-    mock_dynamo.put_item.side_effect = ClientError(
-        {"Error": {"Code": "ConditionalCheckFailedException"}}, 
-        "PutItem"
+DLQ_URL = "https://mock-queue"
+TOPIC_ARN = "arn:aws:sns:us-east-1:123456789012:mock-topic"
+
+
+def make_processor(sqs=None, dynamodb=None, sns=None):
+    return EnterpriseDLQProcessor(
+        sqs=sqs or MagicMock(),
+        dynamodb=dynamodb or MagicMock(),
+        sns=sns or MagicMock(),
+        table_name="mock-idempotency-table",
+        dlq_url=DLQ_URL,
+        alert_topic_arn=TOPIC_ARN,
     )
-    
-    # Configure boto3.client to return our mock DynamoDB when requested
-    mock_boto.side_effect = lambda service_name: mock_dynamo if service_name == "dynamodb" else MagicMock()
-    
-    processor = EnterpriseDLQProcessor()
-    mock_message = {"MessageId": "123", "ReceiptHandle": "abc"}
-    
-    # Execute 
-    result = processor.process_failed_event(mock_message)
-    
-    # Assert that the duplicate message was ignored and logged appropriately
-    assert result == "DUPLICATE_IGNORED"
 
-@patch("boto3.client")
-def test_critical_sre_escalation(mock_boto):
-    """Proves that a message failing 5 times triggers an SRE page and deletes the message."""
-    mock_sns = MagicMock()
-    mock_sqs = MagicMock()
-    mock_dynamo = MagicMock()
-    
-    def boto_router(service_name):
-        if service_name == "sns": return mock_sns
-        if service_name == "sqs": return mock_sqs
-        if service_name == "dynamodb": return mock_dynamo
-    
-    mock_boto.side_effect = boto_router
-    
-    processor = EnterpriseDLQProcessor()
-    
-    # Inject a message that has failed 5 times
-    mock_message = {
-        "MessageId": "999", 
-        "ReceiptHandle": "xyz",
-        "MessageAttributes": {"RetryCount": {"StringValue": "5"}}
-    }
-    
-    result = processor.process_failed_event(mock_message)
-    
-    # Assertions
-    assert result == "ESCALATED_TO_SNS"
-    mock_sns.publish.assert_called_once()
-    mock_sqs.delete_message.assert_called_once_with(QueueUrl="https://mock-queue", ReceiptHandle="xyz")
 
-@patch("boto3.client")
-def test_zero_cost_visibility_delay(mock_boto):
-    """Proves standard failed messages are delayed using visibility timeouts."""
-    mock_sqs = MagicMock()
-    mock_dynamo = MagicMock()
-    
-    # Ensure DynamoDB allows the lock (no exception raised)
-    mock_dynamo.put_item.return_value = {}
-    
-    mock_boto.side_effect = lambda service: mock_sqs if service == "sqs" else mock_dynamo
-    
-    processor = EnterpriseDLQProcessor()
-    
-    # Message failing for the 2nd time
-    mock_message = {
-        "MessageId": "444", 
-        "ReceiptHandle": "def",
-        "MessageAttributes": {"RetryCount": {"StringValue": "2"}}
+def sqs_event(message_id, receipt_handle, receive_count):
+    """Builds a Lambda SQS event record using the keys AWS actually delivers."""
+    return {
+        "Records": [
+            {
+                "messageId": message_id,
+                "receiptHandle": receipt_handle,
+                "body": "{}",
+                "attributes": {"ApproximateReceiveCount": str(receive_count)},
+                "messageAttributes": {},
+            }
+        ]
     }
-    
-    result = processor.process_failed_event(mock_message)
-    
-    assert "DELAYED_" in result
-    mock_sqs.change_message_visibility.assert_called_once()
+
+
+def conditional_check_failed():
+    return ClientError(
+        {"Error": {"Code": "ConditionalCheckFailedException"}}, "PutItem"
+    )
+
+
+def test_idempotency_duplicate_rejection():
+    """A duplicate delivery fails the conditional write and is skipped silently."""
+    dynamo = MagicMock()
+    dynamo.put_item.side_effect = conditional_check_failed()
+    sqs = MagicMock()
+
+    processor = make_processor(sqs=sqs, dynamodb=dynamo)
+    result = processor.process_sqs_event(sqs_event("123", "abc", 1))
+
+    # No failure reported -> the event source mapping deletes the duplicate.
+    assert result == {"batchItemFailures": []}
+    sqs.delete_message.assert_not_called()
+    sqs.change_message_visibility.assert_not_called()
+
+
+def test_successful_processing_marks_idempotent():
+    """Happy path: lock acquired, work done, record marked PROCESSED, no redrive."""
+    dynamo = MagicMock()
+    sqs = MagicMock()
+
+    processor = make_processor(sqs=sqs, dynamodb=dynamo)
+    result = processor.process_sqs_event(sqs_event("777", "ghi", 1))
+
+    assert result == {"batchItemFailures": []}
+    dynamo.update_item.assert_called_once()  # marked PROCESSED
+    sqs.delete_message.assert_not_called()  # mapping handles deletion
+
+
+def test_transient_failure_applies_backoff_and_reports_failure():
+    """A retryable failure releases the lock, sets a backoff, and is redriven."""
+    dynamo = MagicMock()
+    sqs = MagicMock()
+
+    processor = make_processor(sqs=sqs, dynamodb=dynamo)
+    processor._execute_business_logic = MagicMock(side_effect=RuntimeError("downstream down"))
+
+    result = processor.process_sqs_event(sqs_event("444", "def", 2))
+
+    assert result == {"batchItemFailures": [{"itemIdentifier": "444"}]}
+    dynamo.delete_item.assert_called_once()  # lock released for retry
+    sqs.change_message_visibility.assert_called_once()
+    _, kwargs = sqs.change_message_visibility.call_args
+    assert kwargs["QueueUrl"] == DLQ_URL
+    assert kwargs["ReceiptHandle"] == "def"
+    assert kwargs["VisibilityTimeout"] >= 1
+
+
+def test_critical_sre_escalation():
+    """At MAX_RETRIES the message is escalated to SNS and not redriven."""
+    dynamo = MagicMock()
+    sqs = MagicMock()
+    sns = MagicMock()
+
+    processor = make_processor(sqs=sqs, dynamodb=dynamo, sns=sns)
+    processor._execute_business_logic = MagicMock(side_effect=RuntimeError("downstream down"))
+
+    result = processor.process_sqs_event(sqs_event("999", "xyz", 5))
+
+    # Escalated terminal failures are omitted from failures so the mapping deletes them.
+    assert result == {"batchItemFailures": []}
+    sns.publish.assert_called_once()
+    sqs.change_message_visibility.assert_not_called()
+    dynamo.delete_item.assert_called_once()  # lock released
+
+
+def test_invalid_record_is_skipped():
+    """A malformed record without ids is logged and skipped without raising."""
+    processor = make_processor()
+    result = processor.process_sqs_event({"Records": [{"body": "{}"}]})
+    assert result == {"batchItemFailures": []}

@@ -1,8 +1,6 @@
-fastapi
-uvicorn
-redis
-redisvl
-langchain
-langgraph
-sentence-transformers
-boto3
+# Pinned with compatible-release ranges for reproducible local builds.
+# Only direct imports are listed; transitive deps are resolved by pip.
+numpy>=1.26,<3.0
+redis>=5.0,<6.0
+sentence-transformers>=2.7,<4.0
+langgraph>=0.2,<0.5

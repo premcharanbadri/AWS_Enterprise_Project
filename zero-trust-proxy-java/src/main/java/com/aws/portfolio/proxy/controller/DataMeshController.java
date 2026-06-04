@@ -1,5 +1,6 @@
 package com.aws.portfolio.proxy.controller;
 
+import com.aws.portfolio.proxy.security.JwtAuthenticationFilter;
 import com.aws.portfolio.proxy.service.DLPMaskingService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
@@ -25,8 +26,8 @@ public class DataMeshController {
             @RequestBody QueryRequest request,
             HttpServletRequest httpRequest) { // Note: We no longer parse headers manually!
         
-        // Retrieve the cryptographically validated role injected by the Filter
-        String role = (String) httpRequest.getAttribute("validated_role");
+        // Retrieve the validated role injected by the authentication filter.
+        String role = (String) httpRequest.getAttribute(JwtAuthenticationFilter.VALIDATED_ROLE_ATTRIBUTE);
 
         List<Map<String, Object>> mockDatabaseResponse = List.of(
             Map.of("id", "101", "name", "Alice", "ssn", "123-45-6789", "revenue", 5000.0),

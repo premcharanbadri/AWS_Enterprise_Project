@@ -14,30 +14,34 @@ dynamodb_client = boto3.client('dynamodb', region_name=AWS_REGION)
 sns_client = boto3.client('sns', region_name=AWS_REGION)
 
 # Configure logging
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 # Environment variables mapping to the SAM template
 TABLE_NAME = os.environ.get('IDEMPOTENCY_TABLE', 'DLQIdempotencyTable')
 DLQ_URL = os.environ.get('DLQ_URL')
 SNS_TOPIC_ARN = os.environ.get('ALERT_TOPIC_ARN')
+
 MAX_RETRIES = 5
+LOCK_TTL_SECONDS = 86400  # Idempotency records self-expire after 24h via DynamoDB TTL
+
 
 class EnterpriseDLQProcessor:
-    def __init__(self, sqs, dynamodb, sns, table_name):
+    def __init__(self, sqs, dynamodb, sns, table_name, dlq_url, alert_topic_arn):
         self.sqs = sqs
         self.dynamodb = dynamodb
         self.sns = sns
         self.table_name = table_name
+        self.dlq_url = dlq_url
+        self.alert_topic_arn = alert_topic_arn
 
     def _acquire_idempotency_lock(self, message_id):
         """
-        Attempts to acquire a distributed lock in DynamoDB via conditional writes.
-        Returns True if the lock is successfully acquired, False if it is a duplicate.
+        Attempts to acquire a distributed lock in DynamoDB via a conditional write.
+        Returns True if the lock is acquired, False if the message is already
+        being processed or has already completed (a duplicate delivery).
         """
-        # BUG 3 FIX: Calculate TTL (24 hours from current epoch) to ensure locks naturally expire
-        ttl_timestamp = int(time.time()) + 86400
-        
+        ttl_timestamp = int(time.time()) + LOCK_TTL_SECONDS
         try:
             self.dynamodb.put_item(
                 TableName=self.table_name,
@@ -53,10 +57,28 @@ class EnterpriseDLQProcessor:
             if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
                 logger.warning(f"Duplicate message detected and ignored: {message_id}")
                 return False
-            raise e
+            raise
+
+    def _release_idempotency_lock(self, message_id):
+        """
+        Releases the lock after a processing failure so the next redelivery can
+        re-acquire it and retry. Only deletes records still in the PROCESSING
+        state, so a concurrently-completed record is never clobbered.
+        """
+        try:
+            self.dynamodb.delete_item(
+                TableName=self.table_name,
+                Key={'MessageId': {'S': message_id}},
+                ConditionExpression='#st = :processing',
+                ExpressionAttributeNames={'#st': 'Status'},
+                ExpressionAttributeValues={':processing': {'S': 'PROCESSING'}}
+            )
+        except ClientError as e:
+            if e.response['Error']['Code'] != 'ConditionalCheckFailedException':
+                logger.error(f"Failed to release idempotency lock for {message_id}: {e}")
 
     def _mark_processed(self, message_id):
-        """Updates the lock status to prevent future retries of completed work."""
+        """Transitions the lock to PROCESSED so genuine duplicates are rejected."""
         try:
             self.dynamodb.update_item(
                 TableName=self.table_name,
@@ -69,65 +91,75 @@ class EnterpriseDLQProcessor:
             logger.error(f"Failed to update idempotency status for {message_id}: {e}")
 
     def process_sqs_event(self, event):
-        """Main processing loop for incoming SQS batches."""
+        """
+        Processes an SQS batch delivered by the Lambda event source mapping.
+
+        Returns a partial-batch response ({"batchItemFailures": [...]}). The event
+        source mapping deletes succeeded messages automatically and redrives only
+        the reported failures, so this handler never deletes messages itself.
+        """
+        batch_item_failures = []
+
         for record in event.get('Records', []):
-            # BUG 1 FIX: Use standard camelCase keys provided by AWS Lambda SQS triggers
             message_id = record.get('messageId')
             receipt_handle = record.get('receiptHandle')
-            message_attributes = record.get('messageAttributes', {})
-            
+
             if not message_id or not receipt_handle:
                 logger.error("Invalid SQS record received: missing messageId or receiptHandle")
                 continue
 
-            # Safely extract custom retry count from message attributes
+            # SQS maintains the authoritative redelivery counter; a custom message
+            # attribute would never increment across redeliveries.
             try:
-                retry_count = int(message_attributes.get('RetryCount', {}).get('stringValue', '1'))
+                receive_count = int(record.get('attributes', {}).get('ApproximateReceiveCount', '1'))
             except (ValueError, TypeError):
-                retry_count = 1
+                receive_count = 1
 
-            # 1. Idempotency Check
+            # 1. Idempotency guard: skip duplicates already in flight or completed.
             if not self._acquire_idempotency_lock(message_id):
-                continue  # Skip duplicate execution
+                continue
 
             try:
-                # 2. Business Logic Execution
+                # 2. Business logic.
                 self._execute_business_logic(record.get('body'))
-                
-                # 3. Success Cleanup
+
+                # 3. Success: mark processed. The event source mapping deletes the message.
                 self._mark_processed(message_id)
-                self.sqs.delete_message(
-                    QueueUrl=DLQ_URL,
-                    ReceiptHandle=receipt_handle
-                )
                 logger.info(f"Successfully processed message {message_id}")
 
             except Exception as e:
-                logger.error(f"Processing failed for {message_id}: {str(e)}")
-                
-                # 4. Escalation or Backoff
-                if retry_count >= MAX_RETRIES:
+                logger.error(f"Processing failed for {message_id} (receive #{receive_count}): {e}")
+
+                # Release the lock so the redelivery is retried rather than dropped.
+                self._release_idempotency_lock(message_id)
+
+                if receive_count >= MAX_RETRIES:
+                    # Terminal failure: page on-call and let the mapping delete the
+                    # message (omit it from failures) to stop the redrive loop.
                     logger.critical(f"Message {message_id} breached max retries. Escalating to SNS.")
                     self.sns.publish(
-                        TopicArn=SNS_TOPIC_ARN,
+                        TopicArn=self.alert_topic_arn,
                         Message=f"DLQ Remediation Failed permanently for message: {message_id}",
                         Subject="DLQ Max Retries Breached"
                     )
-                    # Delete from queue to prevent an infinite loop after SNS escalation
-                    self.sqs.delete_message(QueueUrl=DLQ_URL, ReceiptHandle=receipt_handle)
                 else:
-                    # BUG 4 FIX: Ensure delay_seconds never truncates to 0 by enforcing a minimum floor
-                    raw_delay = calculate_exponential_backoff(retry_count)
-                    delay_seconds = max(1, int(raw_delay))
-                    
-                    logger.info(f"Applying backoff of {delay_seconds} seconds for {message_id}")
-                    
-                    # Note: Ensure `sqs:ChangeMessageVisibility` is added to the IAM template policy
-                    self.sqs.change_message_visibility(
-                        QueueUrl=DLQ_URL,
-                        ReceiptHandle=receipt_handle,
-                        VisibilityTimeout=delay_seconds
-                    )
+                    # Apply full-jitter exponential backoff via the message's
+                    # visibility timeout, then report it as a batch failure so the
+                    # mapping redrives only this message after the backoff window.
+                    delay_seconds = max(1, int(calculate_exponential_backoff(receive_count)))
+                    logger.info(f"Applying backoff of {delay_seconds}s for {message_id}")
+                    try:
+                        self.sqs.change_message_visibility(
+                            QueueUrl=self.dlq_url,
+                            ReceiptHandle=receipt_handle,
+                            VisibilityTimeout=delay_seconds
+                        )
+                    except ClientError as ce:
+                        logger.error(f"Failed to set backoff visibility for {message_id}: {ce}")
+
+                    batch_item_failures.append({"itemIdentifier": message_id})
+
+        return {"batchItemFailures": batch_item_failures}
 
     def _execute_business_logic(self, payload):
         """Simulates the downstream operation that might fail during an outage."""
@@ -135,16 +167,23 @@ class EnterpriseDLQProcessor:
         # Add actual database or API logic here.
         pass
 
-# Instantiate the processor globally so it is maintained across warm starts
+
+# Instantiate the processor globally so it is reused across warm starts
 processor = EnterpriseDLQProcessor(
     sqs=sqs_client,
     dynamodb=dynamodb_client,
     sns=sns_client,
-    table_name=TABLE_NAME
+    table_name=TABLE_NAME,
+    dlq_url=DLQ_URL,
+    alert_topic_arn=SNS_TOPIC_ARN
 )
 
+
 def lambda_handler(event, context):
-    """Standard AWS Lambda entry point."""
+    """
+    AWS Lambda entry point. Returns a partial-batch response so the SQS event
+    source mapping (configured with ReportBatchItemFailures) only redrives the
+    messages that actually failed.
+    """
     logger.info(f"Received batch of {len(event.get('Records', []))} messages")
-    processor.process_sqs_event(event)
-    return {"statusCode": 200, "body": "Batch processed successfully"}
+    return processor.process_sqs_event(event)

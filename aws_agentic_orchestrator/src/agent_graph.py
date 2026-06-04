@@ -1,11 +1,12 @@
-from typing import Dict, TypedDict
+from typing import Optional, TypedDict
 from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.memory import MemorySaver
 from src.semantic_cache import PrivacyAwareCache
 
-# Define the state that will be passed between nodes (and saved to DynamoDB later)
+# State passed between nodes and persisted by the checkpointer.
 class AgentState(TypedDict):
     task: str
-    cached_response: str
+    cached_response: Optional[str]
     final_output: str
     status: str
 
@@ -31,7 +32,7 @@ def external_llm_execution(state: AgentState) -> AgentState:
     """Node 2: Only executes if cache misses. Simulates external API call."""
     print("--- Node: Executing External LLM (Simulated) ---")
     
-    # In reality, this is where you call an external model.
+    # In reality, this is where we call an external model.
     simulated_response = f"Simulated complex analysis for: {state['task']}"
     
     # Store the new result in our local cache to protect future queries
@@ -75,5 +76,6 @@ workflow.add_conditional_edges(
 workflow.add_edge("external_execution", END)
 workflow.add_edge("process_cached", END)
 
-# Compile the engine
-aegis_engine = workflow.compile()
+# Compile with a checkpointer so run state is persisted and can be resumed by thread_id after a restart.
+checkpointer = MemorySaver()
+aegis_engine = workflow.compile(checkpointer=checkpointer)

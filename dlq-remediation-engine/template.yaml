@@ -39,7 +39,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: .
-      Handler: src.sqs_processor.lambda_handler
+      Handler: sqs_processor.lambda_handler
       Runtime: python3.10
       Architectures:
         - arm64
@@ -63,7 +63,7 @@ Resources:
         - SNSPublishMessagePolicy:
             TopicName: !GetAtt AlertTopic.TopicName
 
-        # BUG 2 FIX: Explicitly grant the required permission to modify message 
+        # Explicitly grant the required permission to modify message 
         # visibility for the exponential backoff algorithm.
         - Statement:
             - Effect: Allow
@@ -77,6 +77,10 @@ Resources:
           Properties:
             Queue: !GetAtt EnterpriseDLQ.Arn
             BatchSize: 10
+            # Enable partial-batch responses so a single failure redrives only
+            # the offending message instead of the entire batch of 10.
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
 
 Outputs:
   DLQRemediationFunction:

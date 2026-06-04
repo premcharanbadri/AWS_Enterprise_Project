@@ -1,74 +1,97 @@
 import os
 import json
+import logging
 import numpy as np
 from redis import Redis
+from redis.exceptions import RedisError
 from sentence_transformers import SentenceTransformer
 from typing import Optional
 
+logger = logging.getLogger(__name__)
+
+CACHE_PREFIX = "aegis:cache:"
+
+
 class PrivacyAwareCache:
     def __init__(self, redis_host="localhost", redis_port=6379, threshold=0.75):
-        # Initialize connection to local Redis Stack
-        self.redis_client = Redis(host=redis_host, port=redis_port, decode_responses=False)
+        # Bounded timeouts so a slow or unreachable Redis degrades to a cache miss
+        # instead of hanging the request path.
+        self.redis_client = Redis(
+            host=redis_host,
+            port=redis_port,
+            decode_responses=False,
+            socket_timeout=2,
+            socket_connect_timeout=2,
+        )
         self.threshold = threshold
-        
-        # Load a local model so confidential data never leaves the VPC for embedding
-        print("Loading local embedding model...")
+
+        # Load a local model so confidential data never leaves the VPC for embedding.
+        logger.info("Loading local embedding model...")
         self.encoder = SentenceTransformer('all-MiniLM-L6-v2')
-        self.vector_dim = 384 
+        self.vector_dim = 384
 
     def _generate_embedding(self, text: str) -> np.ndarray:
         """Generates embeddings strictly on local hardware."""
         return self.encoder.encode(text).astype(np.float32)
 
     def _cosine_similarity(self, vec1: np.ndarray, vec2: np.ndarray) -> float:
-        """Calculates mathematical similarity between two vectors."""
-        dot_product = np.dot(vec1, vec2)
+        """Calculates cosine similarity between two vectors."""
         norm_a = np.linalg.norm(vec1)
         norm_b = np.linalg.norm(vec2)
         if norm_a == 0 or norm_b == 0:
             return 0.0
-        return dot_product / (norm_a * norm_b)
+        return float(np.dot(vec1, vec2) / (norm_a * norm_b))
 
     def check_cache(self, user_prompt: str) -> Optional[str]:
         """
-        Scans local Redis for a semantically similar query.
-        Returns the cached response if similarity exceeds the threshold.
+        Scans local Redis for a semantically similar query and returns the cached
+        response when similarity exceeds the threshold. On any Redis error this
+        returns None so the caller falls back to a live execution.
+
+        Note: this MVP iterates keys with a non-blocking SCAN. A production
+        deployment should index the embeddings with RediSearch and issue a
+        server-side KNN query instead of pulling every vector to the client.
         """
-        query_vector = self._generate_embedding(user_prompt)
-        
-        # In a production environment, this uses RediSearch. 
-        # For this MVP, we do a raw key scan for demonstration.
-        keys = self.redis_client.keys("aegis:cache:*")
-        
-        best_match = None
-        highest_score = 0.0
-        
-        for key in keys:
-            cached_data = json.loads(self.redis_client.get(key).decode('utf-8'))
-            cached_vector = np.array(cached_data['embedding'], dtype=np.float32)
-            
-            score = self._cosine_similarity(query_vector, cached_vector)
+        try:
+            query_vector = self._generate_embedding(user_prompt)
 
-            print(f"  [DEBUG] Compared against '{cached_data['prompt']}' | Score: {score:.2f}")
-            
-            if score > highest_score and score >= self.threshold:
-                highest_score = score
-                best_match = cached_data['response']
-                
-        if best_match:
-            print(f"[CACHE HIT] Similarity Score: {highest_score:.2f} - Preventing external API call.")
-        return best_match
+            best_match = None
+            highest_score = 0.0
 
-    def store_cache(self, user_prompt: str, llm_response: str):
+            # SCAN is cursor-based and non-blocking, unlike KEYS which blocks the entire Redis event loop for the duration of the scan.
+            for key in self.redis_client.scan_iter(match=f"{CACHE_PREFIX}*", count=100):
+                raw = self.redis_client.get(key)
+                if raw is None:
+                    continue
+                cached_data = json.loads(raw.decode('utf-8'))
+                cached_vector = np.asarray(cached_data['embedding'], dtype=np.float32)
+
+                score = self._cosine_similarity(query_vector, cached_vector)
+                if score > highest_score and score >= self.threshold:
+                    highest_score = score
+                    best_match = cached_data['response']
+
+            if best_match is not None:
+                logger.info(f"[CACHE HIT] Similarity {highest_score:.2f} - skipping external API call.")
+            return best_match
+
+        except RedisError as e:
+            logger.warning(f"Cache lookup failed, falling back to live execution: {e}")
+            return None
+
+    def store_cache(self, user_prompt: str, llm_response: str) -> None:
         """Stores the local embedding and response to prevent future external calls."""
-        query_vector = self._generate_embedding(user_prompt)
-        cache_id = f"aegis:cache:{os.urandom(4).hex()}"
-        
-        payload = {
-            "prompt": user_prompt,
-            "embedding": query_vector.tolist(),
-            "response": llm_response
-        }
-        
-        self.redis_client.set(cache_id, json.dumps(payload))
-        print(f"[CACHE STORED] Saved to {cache_id}")
+        try:
+            query_vector = self._generate_embedding(user_prompt)
+            cache_id = f"{CACHE_PREFIX}{os.urandom(4).hex()}"
+
+            payload = {
+                "prompt": user_prompt,
+                "embedding": query_vector.tolist(),
+                "response": llm_response,
+            }
+
+            self.redis_client.set(cache_id, json.dumps(payload))
+            logger.info(f"[CACHE STORED] Saved to {cache_id}")
+        except RedisError as e:
+            logger.warning(f"Cache store failed (continuing without caching): {e}")

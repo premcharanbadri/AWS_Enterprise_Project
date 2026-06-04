@@ -15,17 +15,15 @@ void runTestSuite() {
     std::string q2 = "SELECT SUM(revenue) FROM sales";
     assert(router.routeQuery(q2) == "AWS_ATHENA");
     
-    // Test 3: Heavy OLAP with massive string length (Expected: Snowflake)
-    // Simulating a massive 200+ character generated ORM query
+    // Test 3: Heavy OLAP with massive string length (Expected: Snowflake) Simulating a massive 200+ character generated ORM query
     std::string q3 = "SELECT SUM(revenue) FROM sales JOIN customers ON sales.customer_id = customers.id WHERE region = 'US-EAST' AND status = 'ACTIVE' AND category IN ('A', 'B', 'C', 'D', 'E') GROUP BY region ORDER BY revenue DESC";
     assert(router.routeQuery(q3) == "SNOWFLAKE");
     
-    // Test 4: Space-before-parenthesis evasion attempt - BUG 13 FIX (Expected: AWS Athena)
+    // Test 4: Space-before-parenthesis evasion attempt 
     std::string q4 = "SELECT SUM (revenue) FROM sales";
     assert(router.routeQuery(q4) == "AWS_ATHENA");
     
-    // Test 5: Non-ASCII characters (UTF-8) - BUG 12 FIX (Expected: Amazon RDS)
-    // Should route safely without triggering a segmentation fault/UB
+    // Test 5: Non-ASCII characters (UTF-8). 
     std::string q5 = "SELECT id FROM users WHERE last_name = 'René'";
     assert(router.routeQuery(q5) == "AMAZON_RDS");
     
