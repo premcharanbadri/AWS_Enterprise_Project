@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System 1: Distributed DLQ Auto-Remediation System</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            color: #333;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 50px 20px;
+            background-color: #f9f9f9;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 50px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            border: 1px solid #ffffff;
+        }
+        h1 {
+            color: #24292e;
+            border-bottom: 2px solid #eaecef;
+            padding-bottom: 10px;
+            margin-bottom: 30px;
+        }
+        h2 {
+            color: #0066CC;
+            margin-top: 40px;
+            border-bottom: 1px solid #eaecef;
+            padding-bottom: 5px;
+        }
+        h3 {
+            color: #24292e;
+            margin-top: 25px;
+        }
+        p {
+            margin-bottom: 16px;
+        }
+        ul {
+            margin-bottom: 20px;
+            padding-left: 20px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        .highlight {
+            background-color: #ffffff;
+            padding: 15px;
+            border-left: 4px solid #0066CC;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>System 1: Distributed DLQ Auto-Remediation System</h1>
+        
+        <h2>1. What this actually does</h2>
+        <p>Think of this system as a shock absorber for our microservices. When a downstream database goes offline, API requests start failing. Instead of losing that data or aggressively retrying, this system catches the failed messages, routes them to a Dead Letter Queue (DLQ), and carefully replays them when the database recovers.</p>
+
+        <h2>2. Why I built it</h2>
+        <p>When an outage happens, two issues usually follow. First is the "thundering herd": if 10,000 failed messages retry the exact second the database boots up, they instantly crash it again. Second is duplicate processing: network blips cause cloud queues to sometimes deliver the same message twice. If that message is a financial transaction, we just double-charged a customer.</p>
+        <p>I built this to stop both. It smooths out the retry traffic and mathematically guarantees we only process a message exactly once.</p>
+
+        <h2>3. The system logic (Why I picked these tools)</h2>
+        
+        <h3>Full Jitter vs. Standard Backoff</h3>
+        <p>Standard exponential backoff tells a failing script to "wait 8 seconds." The problem is, if 10,000 messages all wait 8 seconds, they all hit the database simultaneously anyway. I implemented a "Full Jitter" algorithm to inject a randomized delay. It forces those messages to scatter their retries across a time window, physically flattening the concurrency spike so the database can breathe.</p>
+
+        <h3>DynamoDB over Postgres for Idempotency</h3>
+        <p>To stop duplicate transactions, I needed a distributed lock. A standard SQL database like Postgres would eventually bottleneck on connection pooling and table locks. I used DynamoDB Conditional Writes because it evaluates locks at the individual item level with single-digit millisecond latency. If a duplicate message shows up, the write fails instantly, and we safely drop the duplicate.</p>
+
+        <h3>SQS Visibility Timeouts over time.sleep()</h3>
+        <p>If a Python script needs to wait 10 seconds before trying again, the easy way is to write <code>time.sleep(10)</code>. In AWS Lambda, you pay by the millisecond. Sleeping for 10 seconds burns paid compute time for absolutely no reason. Instead, I trigger the SQS Visibility Timeout API to literally hide the message on the queue for 10 seconds, and I kill the Lambda container immediately. The cost of waiting drops to zero.</p>
+
+        <h2>4. Real-world bugs I had to fix</h2>
+        <p>Getting this production-ready meant patching a few critical flaws during code review:</p>
+        <ul>
+            <li><strong>Boto3 Cold Starts:</strong> Initializing the AWS SDK inside the Lambda handler added massive latency during traffic spikes. I moved the initialization to the global scope so warm containers reuse the active connection pool.</li>
+            <li><strong>Jitter Truncation:</strong> Small randomized jitter floats (like 0.4 seconds) were rounding down to zero in Python, causing instant retries instead of backing off. I fixed this by enforcing a mathematical floor of 1 second.</li>
+            <li><strong>Database Memory Leaks:</strong> My idempotency locks were sitting in DynamoDB forever. I implemented a Time-To-Live (TTL) attribute so the locks automatically delete themselves after 24 hours.</li>
+        </ul>
+
+        <h2>5. The Bottom Line</h2>
+        <p>This infrastructure acts as an insurance policy for the engineering team. Our downstream databases recover faster because they aren't hammered by synchronized retries. Financial and operational data stays pristine because duplicate messages are algorithmically rejected. And because it relies purely on event-driven serverless architecture, we don't pay a dime for idle polling servers.</p>
+    </div>
+
+</body>
+</html>

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System 2: Zero-Trust Data Mesh Proxy</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            color: #333;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 50px 20px;
+            background-color: #f9f9f9;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 50px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            border: 1px solid #ffffff;
+        }
+        h1 {
+            color: #24292e;
+            border-bottom: 2px solid #eaecef;
+            padding-bottom: 10px;
+            margin-bottom: 30px;
+        }
+        h2 {
+            color: #0066CC;
+            margin-top: 40px;
+            border-bottom: 1px solid #eaecef;
+            padding-bottom: 5px;
+        }
+        h3 {
+            color: #0066CC;
+            margin-top: 25px;
+        }
+        p {
+            margin-bottom: 16px;
+        }
+        ul {
+            margin-bottom: 20px;
+            padding-left: 20px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        .highlight {
+            background-color: #f1f8ff;
+            padding: 15px;
+            border-left: 4px solid #0066CC;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>System 2: Zero-Trust Data Mesh Proxy</h1>
+        
+        <h2>1. What this actually does</h2>
+        <p>Think of this system as a security checkpoint sitting between our company's employees and our production databases. When someone runs a SQL query, it hits this proxy first. The proxy checks their ID badge (a JWT token).</p>
+        <p>If a System Admin makes a request, the proxy gets the data and hands it right back. But if a Data Analyst makes a request, the proxy gets the data, actively scans the JSON response, scrubs out any credit card numbers or Social Security Numbers (replacing them with XXXX), and only hands back the masked data. It modifies network traffic on the fly without the database or the downstream application knowing it happened.</p>
+
+        <h2>2. Why I built it</h2>
+        <p>Data analysts need access to production tables to do their jobs, but they absolutely should not be looking at unmasked PII (Personally Identifiable Information). Usually, companies rely on individual app developers to remember to write masking logic in their code. Developers always forget, which leads to massive compliance breaches.</p>
+        <p>I built this to take data security entirely out of the hands of app developers. By centralizing it at the network layer, a single security rule instantly applies to the entire engineering organization.</p>
+
+        <h2>3. The system logic (Why Java & Spring?)</h2>
+        <p>You might wonder why I used Java here, while I used Python for the DLQ and C++ for the Query Router. It's about using the right tool for the infrastructure layer.</p>
+        <p>Network proxies must handle thousands of concurrent connections efficiently. Python's Global Interpreter Lock (GIL) makes highly concurrent network I/O a nightmare. Java's multithreading model is built exactly for this. Furthermore, the Spring Boot ecosystem provides a class called <code>OncePerRequestFilter</code>, which gave me the exact hook I needed to inject cryptographic token validation strictly before any routing logic occurs. I didn't use an off-the-shelf service mesh like Envoy because I needed deep, custom JSON payload inspection, which requires custom business logic.</p>
+
+        <h2>4. Real-world bugs I had to fix</h2>
+        <p>Getting this to pass a rigorous code review required patching several critical flaws:</p>
+        <ul>
+            <li><strong>The Aggressive Regex:</strong> My initial masking engine just looked for any 13 to 16-digit sequence. It ended up permanently corrupting non-PII enterprise identifiers like long database primary keys and National Provider Identifiers (NPIs). I had to tighten the regex automata to strictly look for standardized credit card chunking patterns to stop the false positives.</li>
+            <li><strong>Silent Testing Failures:</strong> Maven was silently ignoring my Data Loss Prevention (DLP) test suite because the file was in the wrong directory. Once I moved it and forced the tests to run, I realized my test assertions were fundamentally mismatched with the actual engine's output. I had to realign the test suite to reflect production reality.</li>
+            <li><strong>Auth Bypasses:</strong> For local development, I had a simple string-matching bypass in the JWT filter. A reviewer rightly flagged this as a critical vulnerability if it accidentally shipped. I documented it explicitly and mapped out the production upgrade path to AWS Cognito JWKS.</li>
+        </ul>
+
+        <h2>5. Are these "novel" problems?</h2>
+        <p>A colleague recently asked me: <em>"These problems seem solved, are these novel projects or did you replicate them?"</em></p>
+        <p>They are not novel. They are fundamental enterprise patterns. Startups reward engineers for building "novel" product features; massive tech companies like AWS reward engineers for deeply understanding how to implement foundational, solved problems safely from scratch. Building a zero-trust proxy proves I understand the low-level mechanics of network security, cryptography, and payload manipulation, rather than just knowing how to buy a vendor tool that does it for me.</p>
+
+        <div class="highlight">
+            <h2>6. The Bottom Line</h2>
+            <p>This proxy is a massive win for compliance and developer velocity. It ensures we meet SOC2 and PCI compliance natively at the network level. Application developers can move faster because they don't have to worry about accidentally leaking credit card numbers—the infrastructure has their back.</p>
+        </div>
+    </div>
+
+</body>
+</html>

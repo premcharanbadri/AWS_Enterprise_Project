@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System 4: AWS Agentic Orchestrator</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            color: #333;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 50px 20px;
+            background-color: #f9f9f9;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 50px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            border: 1px solid #ffffff;
+        }
+        h1 {
+            color: #24292e;
+            border-bottom: 2px solid #eaecef;
+            padding-bottom: 10px;
+            margin-bottom: 30px;
+        }
+        h2 {
+            color: #0066CC;
+            margin-top: 40px;
+            border-bottom: 1px solid #eaecef;
+            padding-bottom: 5px;
+        }
+        h3 {
+            color: #0066CC;
+            margin-top: 25px;
+        }
+        p {
+            margin-bottom: 16px;
+        }
+        ul {
+            margin-bottom: 20px;
+            padding-left: 20px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        .highlight {
+            background-color: #f1f8ff;
+            padding: 15px;
+            border-left: 4px solid #0066CC;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>System 4: AWS Agentic Orchestrator</h1>
+        
+        <h2>1. What this actually does</h2>
+        <p>This is not a simple AI chatbot. It is the infrastructure fabric required to run autonomous AI agents in a corporate environment. When an employee asks a complex question (like analyzing revenue data), the agent enters a multi-step loop: it thinks, queries a database, evaluates the result, and formulates an answer.</p>
+        <p>This Agentic Orchestrator wraps this entire process in a protective, cost-saving layer. Before any external LLM is called, it checks a "Semantic Cache." If someone else previously asked a mathematically similar question, it also intercepts the request and instantly returns the cached answer without ever touching the external internet.</p>
+
+        <h2>2. Why I built it</h2>
+        <p>Deploying AI agents in the enterprise has three massive bottlenecks: statefulness, cost, and data privacy. A standard Python AI script treats every call as a stateless, instantaneous event. If the script takes three minutes to run and the network drops, you lose all progress. Furthermore, if 5,000 employees trigger agents that each make 20 underlying API calls to external models, your token bill goes through the roof, and you risk leaking unmasked corporate data outside your firewall.</p>
+        <p>I built this to solve the plumbing. It turns experimental AI scripts into durable, production-ready enterprise software.</p>
+
+        <h2>3. The System logic (Why I picked these tools)</h2>
+        
+        <h3>AWS Step Functions & LangGraph for Statefulness</h3>
+        <p>Agents run in loops. If a compute container recycles halfway through a task, the agent dies. I used AWS Step Functions paired with DynamoDB-backed LangGraph checkpoints to completely abstract the execution state away from the volatile compute layer. Every time the agent makes a decision, it saves its state. If the server drops, a new container simply picks up the graph exactly where it left off.</p>
+
+        <h3>Local Embeddings over OpenAI Embeddings</h3>
+        <p>To figure out if two questions are similar, you turn them into math (vectors) and compare them. Most developers just send the text to OpenAI's embedding API. In an enterprise, sending unmasked queries to a third party violates strict compliance boundaries. I chose to run a lightweight, open-source embedding model (<code>all-MiniLM-L6-v2</code>) locally inside the private AWS VPC. The data never leaves the corporate perimeter.</p>
+
+        <h3>Redis for the Semantic Cache</h3>
+        <p>To compare vector math instantly, you need an in-memory datastore. Rather than doing slow, disk-based vector searches on a traditional relational database, I deployed a Redis vector database (Amazon ElastiCache). It allows for sub-millisecond similarity scans using Cosine Similarity, intercepting redundant requests in real-time.</p>
+
+        <h2>4. Real-world bugs I had to fix</h2>
+        <p>Tuning an AI system for production is a balancing act. During local integration testing, I ran into a critical semantic tuning issue:</p>
+        <ul>
+            <li><strong>Threshold Strictness:</strong> My initial semantic cache was failing to intercept identical intents. A prompt asking for "Q3 revenue" and a prompt asking for "third quarter revenue" were registering as a Cache Miss. The mathematical similarity score generated by the compressed local model was hovering around 0.79, but my intercept threshold was hardcoded to a strict 0.85.</li>
+            <li><strong>The Fix:</strong> I had to build observability logs into the cosine similarity calculation to expose the raw spatial math. Based on the output, I lowered the threshold to 0.75. This single mathematical adjustment caught the semantic matches, saving a 10-second external network call and the associated token cost on every subsequent hit.</li>
+        </ul>
+
+        <h2>5. The Bottom Line</h2>
+        <p>This AWS Agentic Orchestrator makes AI safe for enterprise scale. By intercepting redundant requests before they cross the network perimeter, we drive external API transaction costs to near zero. By running semantic evaluation locally, we guarantee SOC2 and GDPR compliance. And by serializing the execution state, we ensure our autonomous agents survive infrastructure drops without skipping a beat.</p>
+    </div>
+
+</body>
+</html>

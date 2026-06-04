@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System 3: Cost-Aware Federated Query Router</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background-color: #f9f9f9;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            border: 1px solid #e1e4e8;
+        }
+        h1 {
+            color: #24292e;
+            border-bottom: 2px solid #eaecef;
+            padding-bottom: 10px;
+            margin-bottom: 30px;
+        }
+        h2 {
+            color: #0366d6;
+            margin-top: 40px;
+            border-bottom: 1px solid #eaecef;
+            padding-bottom: 5px;
+        }
+        h3 {
+            color: #24292e;
+            margin-top: 25px;
+        }
+        p {
+            margin-bottom: 16px;
+        }
+        ul {
+            margin-bottom: 20px;
+            padding-left: 20px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        .highlight {
+            background-color: #f1f8ff;
+            padding: 15px;
+            border-left: 4px solid #0366d6;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>System 3: Cost-Aware Federated Query Router</h1>
+        
+        <h2>1. What this actually does</h2>
+        <p>Think of this system as a smart traffic cop for database queries. When our application needs data, it fires off a SQL query. Instead of hitting the database directly, it hits this router first.</p>
+        <p>The router looks at the query, figures out how heavy it is, and instantly sends it to the right place. Simple lookups go straight to Amazon RDS. Medium analytics go to AWS Athena. Massive, data-crunching joins get sent to Snowflake.</p>
+
+        <h2>2. Why I built it</h2>
+        <p>We have all seen what happens when a data analyst runs a massive `SELECT SUM` on a live production database. It locks the tables, spikes the CPU, and completely takes down the app for actual customers trying to use the product.</p>
+        <p>I built this to stop that from happening. It intercepts the traffic and automatically routes the heavy, analytical stuff away from our transactional databases.</p>
+
+        <h2>3. Why C++17?</h2>
+        <p>If you are routing thousands of queries a second, latency is everything. If I built this in Java or Python, the language's Garbage Collector would randomly pause the application to clean up memory. Even a 50-millisecond pause is unacceptable at scale.</p>
+        <p>I wrote this in bare-metal C++17 to get deterministic memory management. By using modern smart pointers (`std::unique_ptr`), memory cleans itself up instantly without background pauses, giving us predictable, microsecond response times.</p>
+
+        <h2>4. How the routing logic works</h2>
+        <p>I used the Strategy design pattern so the routing logic does not get tangled up with the actual database connection code.</p>
+        <p>To figure out where a query should go, the router doesn't actually run the SQL. It just reads the raw string, looking for structural keywords like `GROUP BY` or `JOIN`, and calculates a heuristic "weight" score. High score? It routes to Snowflake. Low score? It routes to RDS.</p>
+
+        <h2>5. Real-world bugs I had to fix</h2>
+        <p>Writing safe C++ is tricky. During the code review phase, I had to patch a few critical issues:</p>
+        <ul>
+            <li><strong>Regex compilation overhead:</strong> My regex was originally compiling from scratch on every single query, killing performance. I made the regex `static const` so it only compiles once at startup. Execution time dropped from microseconds to nanoseconds.</li>
+            <li><strong>Memory corruption on ARM:</strong> Converting SQL text to uppercase was causing undefined behavior on ARM processors if the query had non-ASCII characters (like a Unicode table alias). I fixed this by explicitly casting the characters to `unsigned char`.</li>
+            <li><strong>ORM spacing weirdness:</strong> ORMs automatically generate SQL, and they often put spaces in weird places (like `SUM (revenue)` instead of `SUM(revenue)`). My original router missed them, so I updated the regex to catch flexible whitespace.</li>
+        </ul>
+
+        <h2>6. The Bottom Line</h2>
+        <p>This router solves a massive headache for the engineering team. It physically prevents long-running queries from crashing our customer-facing databases. It saves the company money by routing workloads to the most cost-efficient execution engine. Best of all, developers don't have to write complex routing logic into their apps—they just point their code at one URL, and the infrastructure handles the rest.</p>
+    </div>
+
+</body>
+</html>
