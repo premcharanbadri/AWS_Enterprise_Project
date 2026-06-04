@@ -1,6 +1,17 @@
-# AWS Backend & Distributed Systems Project
+# AWS Enterprise Backend & Distributed Systems
 
-This repository contains three backend projects I built to handle common infrastructure challenges: managing message queue failures, securing internal data access, and optimizing database query routing. The main focus across these systems is fault tolerance, security, and algorithmic efficiency.
+This repository contains four backend systems built to solve common enterprise infrastructure problems: managing distributed failures, securing internal data access, optimizing database compute costs, and making AI stateful and cost-efficient. The focus across these projects is fault tolerance, security, and algorithmic efficiency.
+
+## Architectural Deep Dives
+
+To provide full transparency into the engineering logic, infrastructure trade-offs, and business value of this portfolio, I have published detailed architectural reviews for each core system. 
+
+Read the deployed documentation here:
+
+* [System 1: Distributed DLQ Auto-Remediation Engine](./dlq-remediation-engine/index_dlq.html)
+* [System 2: Zero-Trust Data Mesh Proxy](./zero-trust-proxy-java/index_proxy.html)
+* [System 3: Cost-Aware Federated Query Router](./cost-aware-query-router/index_query_router.html)
+* [System 4: Aegis Agentic Orchestrator](./aws_agentic_orchestrator/system4_orchestrator.html)
 
 ## System 1: Distributed DLQ Auto-Remediation System
 
@@ -128,3 +139,33 @@ Make sure `g++` and `make` are installed on your machine.
 *   **AST Parsing:** We can eliminate the regex parser and use a real Abstract Syntax Tree (AST) parser to build out actual execution plans before making routing decisions.
     
 *   **gRPC Integration:** Convert the router into a gRPC microservice so other applications can ping it for routing decisions with microsecond latency.
+
+## System 4: Aegis Agentic Orchestrator
+
+A Python-based orchestrator that wraps autonomous AI agents in a stateful, cost-saving infrastructure layer.
+
+### Why I Built This
+
+Deploying AI in an enterprise has two major bottlenecks: volatile execution state and massive API costs from redundant queries.
+
+I used AWS Step Functions and LangGraph to checkpoint the agent's memory so it can survive container restarts. To cut token costs, I deployed a local semantic cache using an open-source embedding model and Redis. It intercepts mathematically similar prompts and returns cached answers without making external API calls, keeping corporate data safely inside the firewall.
+
+### Tech Stack
+
+*   **Language:** Python 3.11
+    
+*   **Infrastructure:** LangGraph, Amazon ElastiCache (Redis), local HuggingFace embeddings
+    
+
+### Running It Locally
+
+Ensure you have a local Redis instance running.
+
+#### Bash
+
+    cd aws_agentic_orchestrator
+    source venv/bin/activate
+    pip install -r requirements.txt
+    
+    # Execute the local orchestrator script
+    python src/main.py
