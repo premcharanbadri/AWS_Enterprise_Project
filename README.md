@@ -16,13 +16,14 @@ Read the full individual documentation here:
 
 ---
 
-# Here below I explained what steps are needed to run these projects in your local system. To learn about the individual project, click on any of the links above:
+_Here below I explained what steps are needed to run these projects in your local system. To learn about the individual project, click on any of the links above:_
 
-## These projects I built are not novel, here is one of my colleague's question after reviewing my projects:
+#### These projects I built are not novel, here is one of my colleague's question after reviewing my projects:
 
-#### Are these "novel" problems?
-"These problems seem solved, are these novel projects or did you replicate them?"</em></p>
-To be honest, they are not novel. They are fundamental enterprise patterns. Startups reward engineers for building "novel" product features; massive tech companies like AWS reward engineers for deeply understanding how to implement foundational, solved problems safely from scratch. Building a zero-trust proxy proves I understand the low-level mechanics of network security, cryptography, and payload manipulation, rather than just knowing how to buy a vendor tool that does it for me.
+#### _Are these "novel" problems?_
+_"These problems seem solved, are these novel projects or did you replicate them?"_
+
+To be honest, they are not novel. They are fundamental patterns commonly found in an enterprise. For a start-up, "novel" product features are very significant and encouraged,  but massive tech companies like AWS reward engineers for understanding in-depth on how to implement such foundational, solved problems safely from scratch, while emphasizing the knowledge and skill behind these implementations - network security, payload manipulation, etc., rather than just knowing how to buy a vendor tool that does it for me.
 
 ## System 1: Distributed DLQ Auto-Remediation System
 
