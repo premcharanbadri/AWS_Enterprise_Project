@@ -2,8 +2,11 @@ import os
 from unittest.mock import MagicMock
 from botocore.exceptions import ClientError
 
-# Ensure a region is present before the module instantiates its boto3 clients.
+# Ensure required configuration is present before the module instantiates its
+# boto3 clients and runs its startup validation.
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ.setdefault("DLQ_URL", "https://mock-queue")
+os.environ.setdefault("ALERT_TOPIC_ARN", "arn:aws:sns:us-east-1:123456789012:mock-topic")
 
 from sqs_processor import EnterpriseDLQProcessor
 
@@ -106,6 +109,25 @@ def test_critical_sre_escalation():
     sns.publish.assert_called_once()
     sqs.change_message_visibility.assert_not_called()
     dynamo.delete_item.assert_called_once()  # lock released
+
+
+def test_escalation_failure_is_redriven():
+    """If the SNS alert can't be published, the message is reported as a failure."""
+    dynamo = MagicMock()
+    sqs = MagicMock()
+    sns = MagicMock()
+    sns.publish.side_effect = ClientError(
+        {"Error": {"Code": "Throttling"}}, "Publish"
+    )
+
+    processor = make_processor(sqs=sqs, dynamodb=dynamo, sns=sns)
+    processor._execute_business_logic = MagicMock(side_effect=RuntimeError("downstream down"))
+
+    result = processor.process_sqs_event(sqs_event("888", "uvw", 5))
+
+    # Reported as a failure so the mapping redrives it once SNS recovers.
+    assert result == {"batchItemFailures": [{"itemIdentifier": "888"}]}
+    sns.publish.assert_called_once()
 
 
 def test_invalid_record_is_skipped():

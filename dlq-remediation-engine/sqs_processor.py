@@ -22,6 +22,9 @@ TABLE_NAME = os.environ.get('IDEMPOTENCY_TABLE', 'DLQIdempotencyTable')
 DLQ_URL = os.environ.get('DLQ_URL')
 SNS_TOPIC_ARN = os.environ.get('ALERT_TOPIC_ARN')
 
+if not all([DLQ_URL, SNS_TOPIC_ARN]):
+    raise RuntimeError("DLQ_URL and ALERT_TOPIC_ARN must be set")
+
 MAX_RETRIES = 5
 LOCK_TTL_SECONDS = 86400  # Idempotency records self-expire after 24h via DynamoDB TTL
 
@@ -137,11 +140,17 @@ class EnterpriseDLQProcessor:
                     # Terminal failure: page on-call and let the mapping delete the
                     # message (omit it from failures) to stop the redrive loop.
                     logger.critical(f"Message {message_id} breached max retries. Escalating to SNS.")
-                    self.sns.publish(
-                        TopicArn=self.alert_topic_arn,
-                        Message=f"DLQ Remediation Failed permanently for message: {message_id}",
-                        Subject="DLQ Max Retries Breached"
-                    )
+                    try:
+                        self.sns.publish(
+                            TopicArn=self.alert_topic_arn,
+                            Message=f"DLQ Remediation Failed permanently for message: {message_id}",
+                            Subject="DLQ Max Retries Breached"
+                        )
+                    except ClientError as se:
+                        # Keep the message in the queue if the alert can't be sent, so the
+                        # escalation is retried once SNS recovers rather than silently lost.
+                        logger.error(f"Failed to publish max-retry alert for {message_id}: {se}")
+                        batch_item_failures.append({"itemIdentifier": message_id})
                 else:
                     # Apply full-jitter exponential backoff via the message's
                     # visibility timeout, then report it as a batch failure so the

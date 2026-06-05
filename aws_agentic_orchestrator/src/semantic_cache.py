@@ -10,6 +10,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 CACHE_PREFIX = "aws:cache:"
+CACHE_TTL_SECONDS = 86400
 
 
 class PrivacyAwareCache:
@@ -82,6 +83,10 @@ class PrivacyAwareCache:
     def store_cache(self, user_prompt: str, llm_response: str) -> None:
         """Stores the local embedding and response to prevent re-running the live query."""
         try:
+            # Don't store a near-duplicate of something already cached.
+            if self.check_cache(user_prompt) is not None:
+                return
+
             query_vector = self._generate_embedding(user_prompt)
             cache_id = f"{CACHE_PREFIX}{os.urandom(4).hex()}"
 
@@ -91,7 +96,7 @@ class PrivacyAwareCache:
                 "response": llm_response,
             }
 
-            self.redis_client.set(cache_id, json.dumps(payload))
+            self.redis_client.set(cache_id, json.dumps(payload), ex=CACHE_TTL_SECONDS)
             logger.info(f"[CACHE STORED] Saved to {cache_id}")
         except RedisError as e:
             logger.warning(f"Cache store failed (continuing without caching): {e}")

@@ -10,7 +10,7 @@ import java.util.stream.Collectors;
 public class DLPMaskingService {
 
     private static final Pattern SSN_PATTERN = Pattern.compile("\\b\\d{3}-\\d{2}-\\d{4}\\b");
-    private static final Pattern CC_PATTERN = Pattern.compile("\\b(?:\\d[ -]*?){13,16}\\b");
+    private static final Pattern CC_PATTERN = Pattern.compile("\\b\\d{4}[- ]\\d{4}[- ]\\d{4}[- ]\\d{1,4}\\b");
 
     public List<Map<String, Object>> maskPayload(List<Map<String, Object>> rawData, String userRole) {
         if ("SYSTEM_ADMIN".equalsIgnoreCase(userRole)) {
