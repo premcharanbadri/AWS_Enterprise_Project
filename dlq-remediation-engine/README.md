@@ -1,8 +1,10 @@
 # AWS Enterprise Backend & Distributed Systems
 
-Read the deployed documentation here:
+Read the system documentation here:
 
 * [System 1: Distributed DLQ Auto-Remediation Engine](https://premcharanbadri.github.io/AWS_Enterprise_Project/dlq-remediation-engine/index_dlq.html)
+
+<img width="430" height="725" alt="image" src="https://github.com/user-attachments/assets/dc93f0be-08cb-4413-ba4e-22502bdbe311" />
 
 
 ## System 1: Distributed DLQ Auto-Remediation System
