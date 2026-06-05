@@ -2,6 +2,7 @@ from typing import Optional, TypedDict
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from src.semantic_cache import PrivacyAwareCache
+from src.warehouse import run_revenue_analysis, snowflake_is_configured
 
 # State passed between nodes and persisted by the checkpointer.
 class AgentState(TypedDict):
@@ -28,17 +29,26 @@ def check_privacy_cache(state: AgentState) -> AgentState:
         
     return state
 
-def external_llm_execution(state: AgentState) -> AgentState:
-    """Node 2: Only executes if cache misses. Simulates external API call."""
-    print("--- Node: Executing External LLM (Simulated) ---")
-    
-    # In reality, this is where we call an external model.
-    simulated_response = f"Simulated complex analysis for: {state['task']}"
-    
-    # Store the new result in our local cache to protect future queries
-    cache_layer.store_cache(state["task"], simulated_response)
-    
-    state["final_output"] = simulated_response
+def run_data_analysis(state: AgentState) -> AgentState:
+    """Node 2: Runs only on a cache miss. Queries Snowflake for the real numbers."""
+    print("--- Node: Running Data Analysis on Snowflake ---")
+
+    if snowflake_is_configured():
+        try:
+            analysis = run_revenue_analysis()
+        except Exception as error:
+            # Degrade gracefully so a warehouse outage doesn't crash the agent.
+            analysis = f"Could not reach Snowflake: {error}"
+    else:
+        analysis = (
+            "Snowflake credentials are not set, so no live query ran. "
+            "Set SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER and SNOWFLAKE_PASSWORD to enable it."
+        )
+
+    # Cache the result so a similar question skips the warehouse next time.
+    cache_layer.store_cache(state["task"], analysis)
+
+    state["final_output"] = analysis
     return state
 
 def process_cached_result(state: AgentState) -> AgentState:
@@ -51,14 +61,14 @@ def determine_routing(state: AgentState) -> str:
     """Conditional Edge: Determines where to route based on cache status."""
     if state["status"] == "CACHE_HIT":
         return "process_cached"
-    return "execute_external"
+    return "run_analysis"
 
 # Build the Execution Graph
 workflow = StateGraph(AgentState)
 
 # Add Nodes
 workflow.add_node("cache_check", check_privacy_cache)
-workflow.add_node("external_execution", external_llm_execution)
+workflow.add_node("run_analysis", run_data_analysis)
 workflow.add_node("process_cached", process_cached_result)
 
 # Define the Edges
@@ -67,15 +77,15 @@ workflow.add_conditional_edges(
     "cache_check",
     determine_routing,
     {
-        "execute_external": "external_execution",
+        "run_analysis": "run_analysis",
         "process_cached": "process_cached"
     }
 )
 
 # Route everything to END
-workflow.add_edge("external_execution", END)
+workflow.add_edge("run_analysis", END)
 workflow.add_edge("process_cached", END)
 
 # Compile with a checkpointer so run state is persisted and can be resumed by thread_id after a restart.
 checkpointer = MemorySaver()
-aegis_engine = workflow.compile(checkpointer=checkpointer)
+aws_engine = workflow.compile(checkpointer=checkpointer)

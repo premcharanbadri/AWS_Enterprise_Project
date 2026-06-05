@@ -140,7 +140,7 @@ Make sure `g++` and `make` are installed on your machine.
     
 *   **gRPC Integration:** Convert the router into a gRPC microservice so other applications can ping it for routing decisions with microsecond latency.
 
-## System 4: Aegis Agentic Orchestrator
+## System 4: AWS Agentic Orchestrator
 
 A Python-based orchestrator that wraps autonomous AI agents in a stateful, cost-saving infrastructure layer.
 

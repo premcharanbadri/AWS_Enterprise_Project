@@ -9,7 +9,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-CACHE_PREFIX = "aegis:cache:"
+CACHE_PREFIX = "aws:cache:"
 
 
 class PrivacyAwareCache:
@@ -72,7 +72,7 @@ class PrivacyAwareCache:
                     best_match = cached_data['response']
 
             if best_match is not None:
-                logger.info(f"[CACHE HIT] Similarity {highest_score:.2f} - skipping external API call.")
+                logger.info(f"[CACHE HIT] Similarity {highest_score:.2f} - skipping the live query.")
             return best_match
 
         except RedisError as e:
@@ -80,7 +80,7 @@ class PrivacyAwareCache:
             return None
 
     def store_cache(self, user_prompt: str, llm_response: str) -> None:
-        """Stores the local embedding and response to prevent future external calls."""
+        """Stores the local embedding and response to prevent re-running the live query."""
         try:
             query_vector = self._generate_embedding(user_prompt)
             cache_id = f"{CACHE_PREFIX}{os.urandom(4).hex()}"

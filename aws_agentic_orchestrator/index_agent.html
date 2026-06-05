@@ -61,8 +61,8 @@
         <h1>System 4: AWS Agentic Orchestrator</h1>
         
         <h2>1. What this actually does</h2>
-        <p>This is not a simple AI chatbot. It is the infrastructure fabric required to run autonomous AI agents in a corporate environment. When an employee asks a complex question (like analyzing revenue data), the agent enters a multi-step loop: it thinks, queries a database, evaluates the result, and formulates an answer.</p>
-        <p>This Agentic Orchestrator wraps this entire process in a protective, cost-saving layer. Before any external LLM is called, it checks a "Semantic Cache." If someone else previously asked a mathematically similar question, it also intercepts the request and instantly returns the cached answer without ever touching the external internet.</p>
+        <p>This is not a simple AI chatbot. It is the plumbing you need to run an AI agent against real company data. When an employee asks something like "what's our revenue by segment," the agent checks a local cache first. If nobody has asked that question before, it runs an analytical query against Snowflake's TPC-H sample data and hands back the numbers.</p>
+        <p>The cache is there so we don't pay to do the same work twice. Before the agent runs a fresh query, it checks a "Semantic Cache." If someone already asked a question that means the same thing, it returns the saved answer right away instead of going back to Snowflake.</p>
 
         <h2>2. Why I built it</h2>
         <p>Deploying AI agents in the enterprise has three massive bottlenecks: statefulness, cost, and data privacy. A standard Python AI script treats every call as a stateless, instantaneous event. If the script takes three minutes to run and the network drops, you lose all progress. Furthermore, if 5,000 employees trigger agents that each make 20 underlying API calls to external models, your token bill goes through the roof, and you risk leaking unmasked corporate data outside your firewall.</p>

@@ -63,7 +63,7 @@
         
         <h2>1. What this actually does</h2>
         <p>Think of this system as a smart traffic cop for database queries. When our application needs data, it fires off a SQL query. Instead of hitting the database directly, it hits this router first.</p>
-        <p>The router looks at the query, figures out how heavy it is, and instantly sends it to the right place. Simple lookups go straight to Amazon RDS. Medium analytics go to AWS Athena. Massive, data-crunching joins get sent to Snowflake.</p>
+        <p>The router looks at the query, figures out how heavy it is, and decides where it should go. Simple lookups are pointed at Amazon RDS. Medium analytics go to AWS Athena. Massive, data-crunching joins get sent to Snowflake.</p>
 
         <h2>2. Why I built it</h2>
         <p>We have all seen what happens when a data analyst runs a massive `SELECT SUM` on a live production database. It locks the tables, spikes the CPU, and completely takes down the app for actual customers trying to use the product.</p>
@@ -71,7 +71,7 @@
 
         <h2>3. Why C++17?</h2>
         <p>If you are routing thousands of queries a second, latency is everything. If I built this in Java or Python, the language's Garbage Collector would randomly pause the application to clean up memory. Even a 50-millisecond pause is unacceptable at scale.</p>
-        <p>I wrote this in bare-metal C++17 to get deterministic memory management. By using modern smart pointers (`std::unique_ptr`), memory cleans itself up instantly without background pauses, giving us predictable, microsecond response times.</p>
+        <p>I wrote this in bare-metal C++17 to get deterministic memory management. By using modern smart pointers (`std::unique_ptr`), memory cleans itself up as soon as it's done being used, with no garbage collector that might pause the program at the worst moment. The routing decision stays fast and predictable.</p>
 
         <h2>4. How the routing logic works</h2>
         <p>I used the Strategy design pattern so the routing logic does not get tangled up with the actual database connection code.</p>
@@ -80,7 +80,7 @@
         <h2>5. Real-world bugs I had to fix</h2>
         <p>Writing safe C++ is tricky. During the code review phase, I had to patch a few critical issues:</p>
         <ul>
-            <li><strong>Regex compilation overhead:</strong> My regex was originally compiling from scratch on every single query, killing performance. I made the regex `static const` so it only compiles once at startup. Execution time dropped from microseconds to nanoseconds.</li>
+            <li><strong>Regex compilation overhead:</strong> My regex was originally compiling from scratch on every single query, which is wasteful. I made the regex `static const` so it only compiles once at startup instead of rebuilding on every call.</li>
             <li><strong>Memory corruption on ARM:</strong> Converting SQL text to uppercase was causing undefined behavior on ARM processors if the query had non-ASCII characters (like a Unicode table alias). I fixed this by explicitly casting the characters to `unsigned char`.</li>
             <li><strong>ORM spacing weirdness:</strong> ORMs automatically generate SQL, and they often put spaces in weird places (like `SUM (revenue)` instead of `SUM(revenue)`). My original router missed them, so I updated the regex to catch flexible whitespace.</li>
         </ul>

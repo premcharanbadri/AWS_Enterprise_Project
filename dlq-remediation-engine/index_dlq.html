@@ -61,7 +61,7 @@
         <h1>System 1: Distributed DLQ Auto-Remediation System</h1>
         
         <h2>1. What this actually does</h2>
-        <p>Think of this system as a shock absorber for our microservices. When a downstream database goes offline, API requests start failing. Instead of losing that data or aggressively retrying, this system catches the failed messages, routes them to a Dead Letter Queue (DLQ), and carefully replays them when the database recovers.</p>
+        <p>Think of this system as a shock absorber for our microservices. When a downstream database goes offline, API requests start failing. Instead of losing that data or aggressively retrying, this system catches the failed messages, routes them to a Dead Letter Queue (DLQ), and carefully replays them when the database recovers. And if a message keeps failing no matter what — a malformed "poison pill" that will never succeed — it gets moved to a separate terminal queue after five tries so it can't clog up the retries forever.</p>
 
         <h2>2. Why I built it</h2>
         <p>When an outage happens, two issues usually follow. First is the "thundering herd": if 10,000 failed messages retry the exact second the database boots up, they instantly crash it again. Second is duplicate processing: network blips cause cloud queues to sometimes deliver the same message twice. If that message is a financial transaction, we just double-charged a customer.</p>
