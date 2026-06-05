@@ -1,8 +1,10 @@
 # AWS Enterprise Backend & Distributed Systems
 
-Read the deployed documentation here:
+Read the system documentation here:
 
 * [System 2: Zero-Trust Data Mesh Proxy](https://premcharanbadri.github.io/AWS_Enterprise_Project/zero-trust-proxy-java/index_proxy.html)
+
+<img width="475" height="725" alt="image" src="https://github.com/user-attachments/assets/1affabb8-86d4-4ca9-9f59-dba55954127a" />
 
 
 ## System 2: Zero-Trust Data Mesh Proxy System
