@@ -4,7 +4,7 @@ Read the system documentation here:
 
 * [System 2: Zero-Trust Data Mesh Proxy](https://premcharanbadri.github.io/AWS_Enterprise_Project/zero-trust-proxy-java/index_proxy.html)
 
-<img width="475" height="725" alt="image" src="https://github.com/user-attachments/assets/1affabb8-86d4-4ca9-9f59-dba55954127a" />
+<img width="475" height="725" alt="image" src="https://github.com/user-attachments/assets/81bdaf73-529c-4d4c-b632-50f812c00d5e" />
 
 
 ## System 2: Zero-Trust Data Mesh Proxy System
