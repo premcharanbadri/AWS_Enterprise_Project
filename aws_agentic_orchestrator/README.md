@@ -1,8 +1,10 @@
 # AWS Enterprise Backend & Distributed Systems
 
-Read the deployed documentation here:
+Read the System documentation here:
 
 * [System 4: AWS Agentic Orchestrator](https://premcharanbadri.github.io/AWS_Enterprise_Project/aws_agentic_orchestrator/index_agent.html)
+
+<img width="430" height="725" alt="image" src="https://github.com/user-attachments/assets/9a1444ed-aabe-48b9-b0ad-7521ec1848d6" />
 
 
 ## System 4: AWS Agentic Orchestrator
