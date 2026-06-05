@@ -1,8 +1,10 @@
 # AWS Enterprise Backend & Distributed Systems
 
-Read the deployed documentation here:
+Read the system documentation here:
 
 * [System 3: Cost-Aware Federated Query Router](https://premcharanbadri.github.io/AWS_Enterprise_Project/cost-aware-query-router/index_query_router.html)
+
+<img width="475" height="725" alt="image" src="https://github.com/user-attachments/assets/bc127b1a-795a-47b3-ab74-e7fe29a45767" />
 
 
 ## System 3: Cost-Aware Federated Query Router
